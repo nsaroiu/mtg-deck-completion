@@ -1,0 +1,6 @@
+datasets==5.0.1
+huggingface_hub==1.30.0
+numpy==2.5.1
+Requests==2.34.2
+sentence-transformers==6.0.1
+torch==2.14.0

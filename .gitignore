@@ -1,0 +1,17 @@
+.env
+.DS_Store
+*.log
+
+__pycache__/
+*.pyc
+
+# Scryfall bulk data + derived tokenizer artifacts - gitignored, regenerable
+# via tokenizer/fetch_oracle_cards.py + tokenizer/mtg_tokenizer.py, or
+# downloadable from the published Hugging Face model repo.
+oracle-cards.jsonl
+tokenizer.json
+tokenizer_text_embeddings.npy
+
+# Trained checkpoints and other pipeline outputs - gitignored, downloadable
+# from the published Hugging Face model/dataset repos rather than committed.
+data/
