@@ -548,14 +548,22 @@ class CardTokenizer:
 
 
 # ---------------------------------------------------------------------------
-# Smoke test against the real, already-built tokenizer.json (gitignored,
-# regenerable -- see README.md's Setup section for how to build it fresh)
+# Build tokenizer.json from oracle-cards.jsonl (fetch it first with
+# tokenizer/fetch_oracle_cards.py), then smoke-test the result. An existing
+# tokenizer.json is passed as previous_tokenizer_path, so a rebuild keeps
+# every already-known card's token id and only appends new cards at the end.
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # tok = CardTokenizer.from_scryfall_bulk("./oracle-cards.jsonl", previous_tokenizer_path="./tokenizer.json")
-    # tok.save_pretrained("./tokenizer.json")
-    tok = CardTokenizer.load_pretrained("./tokenizer.json")
+    bulk_path = Path("./oracle-cards.jsonl")
+    tokenizer_path = Path("./tokenizer.json")
+    if not bulk_path.exists():
+        raise SystemExit(f"{bulk_path} not found -- run `python3 -m tokenizer.fetch_oracle_cards` first.")
+    previous = str(tokenizer_path) if tokenizer_path.exists() else None
+    print(f"Building tokenizer from {bulk_path}" + (f" (reusing token ids from {previous})" if previous else ""))
+    CardTokenizer.from_scryfall_bulk(str(bulk_path), previous_tokenizer_path=previous).save_pretrained(str(tokenizer_path))
+
+    tok = CardTokenizer.load_pretrained(str(tokenizer_path))
     print(f"Vocab size (basics excluded): {tok.vocab_size}")
     print(f"Keyword vocab size: {len(tok.keyword_vocab)}")
     print(f"Structured feature_dim: {tok.feature_dim}")

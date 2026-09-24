@@ -79,19 +79,22 @@ pip install -r requirements.txt
 from huggingface_hub import hf_hub_download
 
 repo = "nsaroiu/mtg-deck-completion"
-for f in ["deepsets_softmax_checkpoint.pt", "set_transformer_softmax_checkpoint.pt",
-          "prune_checkpoint_inject_lowdensity.pt", "tokenizer.json",
-          "tokenizer_text_embeddings.npy", "card_tiers.json"]:
+# Tokenizer files at the repo root, checkpoints + tiers under ./data/ --
+# the paths every script and CLI in this repo expects. Run from the repo root.
+for f in ["tokenizer.json", "tokenizer_text_embeddings.npy"]:
     hf_hub_download(repo_id=repo, filename=f, local_dir=".")
+for f in ["deepsets_softmax_checkpoint.pt", "set_transformer_softmax_checkpoint.pt",
+          "prune_checkpoint_inject_lowdensity.pt", "card_tiers.json"]:
+    hf_hub_download(repo_id=repo, filename=f, local_dir="./data")
 
 from training.evaluate import load_checkpoint
 from training.ensemble import ensemble_complete_deck, load_tiers
 from training.train import pick_device
 
 device = pick_device()
-staple_model, tok, _ = load_checkpoint("deepsets_softmax_checkpoint.pt", device)
-synergy_model, _, _ = load_checkpoint("set_transformer_softmax_checkpoint.pt", device)
-tiers = load_tiers(tok, path="card_tiers.json")
+staple_model, tok, _ = load_checkpoint("./data/deepsets_softmax_checkpoint.pt", device)
+synergy_model, _, _ = load_checkpoint("./data/set_transformer_softmax_checkpoint.pt", device)
+tiers = load_tiers(tok)  # defaults to ./data/card_tiers.json
 
 # (name, score, source) triples, source in {"synergy", "staple"}
 results = ensemble_complete_deck(
@@ -108,6 +111,10 @@ Or from the command line, once the files above are downloaded:
 python3 -m training.ensemble --commander "Atraxa, Praetors' Voice" --top 20
 python3 -m training.ensemble --commander "Silas Renn, Seeker Adept" --commander "Rograkh, Son of Rohgahh" \
     --card "Sol Ring" --card "Command Tower" --top 15
+
+# The pruning pass is off by default; pass the prune checkpoint to enable it:
+python3 -m training.ensemble --commander "Atraxa, Praetors' Voice" --top 20 \
+    --prune-checkpoint ./data/prune_checkpoint_inject_lowdensity.pt
 ```
 
 `training/complete_deck.py` exposes a single specialist checkpoint at a
@@ -117,13 +124,21 @@ time, without the ensemble fusion, if that's all you need.
 
 ```bash
 python3 -m tokenizer.fetch_oracle_cards      # fetch card data from Scryfall
-python3 -m tokenizer.mtg_tokenizer           # build the card vocabulary
-python3 -m training.train --epochs 40 --loss-type softmax --encoder-type deepsets
+python3 -m tokenizer.mtg_tokenizer           # build the card vocabulary (tokenizer.json)
+python3 -m training.train --epochs 40 --loss-type softmax --encoder-type deepsets \
+    --checkpoint-path ./data/deepsets_softmax_checkpoint.pt \
+    --history-path ./data/deepsets_softmax_train_history.json
 python3 -m training.train --epochs 40 --loss-type softmax --encoder-type set_transformer \
-    --checkpoint-path ./data/set_transformer_softmax_checkpoint.pt
+    --checkpoint-path ./data/set_transformer_softmax_checkpoint.pt \
+    --history-path ./data/set_transformer_softmax_train_history.json
 python3 -m training.export_card_tiers        # data/card_tiers.json, needed by ensemble.py
-python3 -m training.evaluate --split all     # Recall/Precision/MRR @ K
+python3 -m training.evaluate --split all \
+    --checkpoint ./data/deepsets_softmax_checkpoint.pt   # Recall/Precision/MRR @ K
 ```
+
+Pass `--checkpoint-path` explicitly: without it, `training/train.py` writes
+to `./data/deepsets_checkpoint.pt` whatever the encoder or loss, which
+is not a filename the ensemble loads.
 
 Training data is loaded automatically: `training/deck_dataset.py`'s
 `load_decks_auto` uses a local `data/dataset.jsonl.gz` if present, else
@@ -131,10 +146,15 @@ pulls straight from the published
 [`nsaroiu/moxfield-dump`](https://huggingface.co/datasets/nsaroiu/moxfield-dump)
 Hub dataset (needs the `datasets` package, already in `requirements.txt`).
 
-The optional deck-pruning model trains separately:
+The optional deck-pruning model trains separately. The published checkpoint
+was trained in `inject` mode (extra negatives added on top of an intact real
+deck) at a low 3–8% negative density; higher densities were tried and
+rejected because they started cutting genuinely strong cards:
 
 ```bash
-python3 -m training.train_prune --epochs 20
+python3 -m training.train_prune --epochs 20 --train-mode inject \
+    --inject-ratio-min 0.03 --inject-ratio-max 0.08 \
+    --checkpoint-path ./data/prune_checkpoint_inject_lowdensity.pt
 ```
 
 ## Evaluation
