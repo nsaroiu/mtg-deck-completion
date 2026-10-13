@@ -186,6 +186,7 @@ def _prune_round(
     temperature: float | None,
     cmdr_tensor: torch.Tensor,
     cmdr_mask: torch.Tensor,
+    max_token_id: int,
 ) -> tuple[list[tuple[str, float, str]], int]:
     """One cut-then-refill round -- see _prune_and_refill below for why this
     runs in an outer loop instead of once. Iteratively cuts the single
@@ -217,7 +218,7 @@ def _prune_round(
     actually stands once an earlier cut has already happened."""
     cut_names: list[str] = []
     for _ in range(max_cuts):
-        tagged_ids = [resolve_or_die(tok, name) for name, _, _ in tagged]
+        tagged_ids = [resolve_or_die(tok, name, max_token_id) for name, _, _ in tagged]
         eligible_idx = [
             i for i, cid in enumerate(tagged_ids)
             if not _is_land(tok, cid) and tiers.get(cid) != "staple"
@@ -242,8 +243,8 @@ def _prune_round(
     if not cut_names:
         return tagged, 0
 
-    kept_ids = [resolve_or_die(tok, name) for name, _, _ in tagged]
-    mask = legal_mask(tok, commander_colors)
+    kept_ids = [resolve_or_die(tok, name, max_token_id) for name, _, _ in tagged]
+    mask = legal_mask(tok, commander_colors, vocab_size=synergy_model.card_embedding.vocab_size)
     picked = known_ids + kept_ids
     rng = random.Random(0)
     n_needed = len(cut_names)
@@ -280,6 +281,7 @@ def _prune_and_refill(
     prune_threshold: float,
     chunk_size: int | None,
     temperature: float | None,
+    max_token_id: int,
 ) -> list[tuple[str, float, str]]:
     """Phase 3 -- see module docstring for scope/motivation. Runs up to
     max_rounds full cut-then-refill cycles (_prune_round above), stopping
@@ -312,7 +314,7 @@ def _prune_and_refill(
         tagged, n_cut = _prune_round(
             tagged, known_ids, commander_colors, tok, device,
             prune_model, synergy_model, tiers, budget, prune_threshold,
-            chunk_size, temperature, cmdr_tensor, cmdr_mask,
+            chunk_size, temperature, cmdr_tensor, cmdr_mask, max_token_id,
         )
         total_cuts += n_cut
         if n_cut == 0:
@@ -363,6 +365,19 @@ def ensemble_complete_deck(
     against runaway over-pruning, not targets."""
     cards = cards or []
 
+    # Shared bound across every resolve_or_die call in this function (and
+    # everything it calls into, e.g. _prune_and_refill/_prune_round): the
+    # MINIMUM vocab_size of every checkpoint actually in play, since a
+    # resolved id gets fed to whichever of these models is active and each
+    # has its own independently-trained (and independently-sized)
+    # id_embedding table -- see resolve_or_die's docstring for why this
+    # matters once tokenizer.json has been refreshed to include cards newer
+    # than one or more of these checkpoints.
+    vocab_sizes = [staple_model.card_embedding.vocab_size, synergy_model.card_embedding.vocab_size]
+    if prune_model is not None:
+        vocab_sizes.append(prune_model.card_embedding.vocab_size)
+    max_token_id = min(vocab_sizes) - 1
+
     # -- phase 1: synergy specialist, iterative by default (see module
     # docstring for why this goes first and why iterative is the default) --
     synergy_picks = complete_deck(
@@ -371,9 +386,9 @@ def ensemble_complete_deck(
         chunk_size=chunk_size, temperature=temperature,
     )
 
-    cmdr_ids = [resolve_or_die(tok, name) for name in commanders]
-    known_ids = [resolve_or_die(tok, name) for name in cards]
-    synergy_ids = [resolve_or_die(tok, name) for name, _ in synergy_picks]
+    cmdr_ids = [resolve_or_die(tok, name, max_token_id) for name in commanders]
+    known_ids = [resolve_or_die(tok, name, max_token_id) for name in cards]
+    synergy_ids = [resolve_or_die(tok, name, max_token_id) for name, _ in synergy_picks]
 
     commander_colors: set[str] = set()
     for cid in cmdr_ids:
@@ -408,7 +423,7 @@ def ensemble_complete_deck(
 
         # -- backfill: one single-shot pass through the staple specialist,
         # restricted to legal + unpicked + staple-tier candidates --
-        mask = legal_mask(tok, commander_colors)
+        mask = legal_mask(tok, commander_colors, vocab_size=staple_model.card_embedding.vocab_size)
 
         already_present = known_ids + kept_ids
         logits = _run_model(staple_model, tok, device, cmdr_tensor, cmdr_mask, already_present, mask)
@@ -433,6 +448,7 @@ def ensemble_complete_deck(
     return _prune_and_refill(
         result, cmdr_ids, known_ids, commander_colors, tok, device,
         prune_model, synergy_model, tiers, max_prune, max_rounds, prune_threshold, chunk_size, temperature,
+        max_token_id,
     )
 
 

@@ -48,12 +48,26 @@ class UnknownCardError(ValueError):
     still turns it into a CLI exit."""
 
 
-def legal_mask(tok: CardTokenizer, commander_colors: set[str]) -> torch.Tensor:
+def legal_mask(tok: CardTokenizer, commander_colors: set[str], vocab_size: int | None = None) -> torch.Tensor:
     """(vocab_size,) bool tensor: True where a card's color identity is a
     subset of commander_colors. Special tokens (all-zero feature rows) are
     excluded explicitly, since an empty color identity would otherwise
-    trivially pass the subset check."""
+    trivially pass the subset check.
+
+    vocab_size: truncates to this many rows instead of tok's own (current)
+    vocab_size -- pass the specific model's card_embedding.vocab_size at
+    inference time. Matters for the same reason resolve_or_die's
+    max_token_id does: tokenizer.json can grow past a checkpoint's trained
+    vocab (new sets get appended via previous_tokenizer_path -- see
+    resolve_or_die's docstring), and this mask gets applied directly against
+    that model's (fixed-size) logits via logits[~mask] -- a mask sized to
+    tok's current, possibly-larger vocab_size would mismatch shape against
+    the model's actual (smaller, frozen-at-training-time) output. New cards
+    are always appended at the end, so truncating to the first vocab_size
+    rows never misclassifies any card the model actually knows about."""
     feats = tok.feature_matrix()
+    if vocab_size is not None:
+        feats = feats[:vocab_size]
     color_cols = feats[:, : len(COLORS)]  # (vocab_size, 5), 0/1
     allowed = np.array([1.0 if c in commander_colors else 0.0 for c in COLORS], dtype=np.float32)
     illegal = (color_cols * (1.0 - allowed)).sum(axis=1) > 0
@@ -63,11 +77,35 @@ def legal_mask(tok: CardTokenizer, commander_colors: set[str]) -> torch.Tensor:
     return mask
 
 
-def resolve_or_die(tok: CardTokenizer, name: str) -> int:
+def resolve_or_die(tok: CardTokenizer, name: str, max_token_id: int | None = None) -> int:
+    """Resolves name -> token id, then (if max_token_id is given) checks the
+    id is actually within a loaded checkpoint's trained vocabulary before
+    handing it back. This matters because the tokenizer and a checkpoint
+    are independently-versioned artifacts -- tokenizer.json gets refreshed
+    periodically as Scryfall prints new sets (fetch fresh oracle-cards.jsonl,
+    then CardTokenizer.from_scryfall_bulk(..., previous_tokenizer_path=...)
+    so existing cards keep their ids), appending new cards at the end of the
+    vocab, but a checkpoint's HybridCardEmbedding.id_embedding table is a
+    fixed size, frozen at whatever vocab_size existed when it was trained.
+    A name that only resolves to one of the newly-appended cards passes
+    tok.resolve_name() fine (it's a real, valid vocab entry) but is out of
+    bounds for that specific checkpoint's embedding table -- verified live
+    that this isn't just a theoretical concern: on MPS, indexing
+    id_embedding out of bounds doesn't even raise a catchable Python
+    exception, it aborts the whole process later (possibly after silently
+    computing on garbage first). Catching it here, with the name still in
+    hand, turns that into a clear, immediate UnknownCardError instead."""
     token = tok.resolve_name(name)
     if token is None:
         raise UnknownCardError(f"Could not resolve card name: {name!r}")
-    return tok.token_to_id[token]
+    token_id = tok.token_to_id[token]
+    if max_token_id is not None and token_id > max_token_id:
+        raise UnknownCardError(
+            f"{name!r} was added to the tokenizer after this checkpoint was trained "
+            f"(token id {token_id}, checkpoint vocab covers only 0-{max_token_id}) -- "
+            f"not usable with this model until it's retrained on a tokenizer that includes it."
+        )
+    return token_id
 
 
 def _run_model(model, tok, device, cmdr_tensor, cmdr_mask, picked: list[int], mask: torch.Tensor) -> torch.Tensor:
@@ -173,8 +211,9 @@ def complete_deck(
         device = pick_device()
         model, tok, _ckpt = load_checkpoint(checkpoint_path, device)
 
-    cmdr_ids = [resolve_or_die(tok, name) for name in commanders]
-    card_ids = [resolve_or_die(tok, name) for name in (cards or [])]
+    max_token_id = model.card_embedding.vocab_size - 1
+    cmdr_ids = [resolve_or_die(tok, name, max_token_id) for name in commanders]
+    card_ids = [resolve_or_die(tok, name, max_token_id) for name in (cards or [])]
 
     cmdr_tensor = torch.tensor([cmdr_ids], dtype=torch.long, device=device)
     cmdr_mask = torch.ones_like(cmdr_tensor, dtype=torch.bool)
@@ -183,7 +222,7 @@ def complete_deck(
     for cid in cmdr_ids:
         card = tok.card_by_token[tok.id_to_token[cid]]
         commander_colors |= set(card.color_identity)
-    mask = legal_mask(tok, commander_colors)
+    mask = legal_mask(tok, commander_colors, vocab_size=max_token_id + 1)
 
     if chunk_size is None:
         # Single-shot: exactly the original implementation, so every
