@@ -1,7 +1,7 @@
 # mtg-deck-completion
 
 A deck-completion model for Magic: The Gathering Commander decks, trained
-on 122,571 real public Commander decklists
+on 189,108 real public Commander decklists
 ([dataset](https://huggingface.co/datasets/nsaroiu/moxfield-dump)).
 
 Given a commander — and optionally a partial decklist — the trained model
@@ -165,13 +165,13 @@ empty), staple-recognition checkpoint, validation split:
 
 | mask ratio | Recall@50 | Precision@50 | MRR |
 |---|---|---|---|
-| 0.1 (deck mostly complete) | 0.60 | 0.10 | 0.132 |
-| 0.5 | 0.51 | 0.44 | 0.068 |
-| 0.9 (deck mostly empty) | 0.38 | 0.59 | 0.046 |
+| 0.1 (deck mostly complete) | 0.57 | 0.10 | 0.121 |
+| 0.5 | 0.48 | 0.40 | 0.066 |
+| 0.9 (deck mostly empty) | 0.36 | 0.54 | 0.045 |
 
 Held-out-commander split (commanders never seen in training, testing
 generalization via card content rather than memorized co-occurrence):
-Recall@50 0.27–0.41 across the same ratio range — meaningfully above
+Recall@50 0.29–0.44 across the same ratio range — meaningfully above
 chance, confirming the hybrid content embeddings carry real signal for
 unfamiliar commanders.
 
@@ -192,6 +192,4 @@ unfamiliar commanders.
 ## License
 
 MIT (see `LICENSE`). The training data itself is a collection of public
-Moxfield decklists with no asserted license — see the
-[dataset card](https://huggingface.co/datasets/nsaroiu/moxfield-dump) for
-details.
+Moxfield decklists with no asserted license.
