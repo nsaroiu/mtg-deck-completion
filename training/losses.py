@@ -86,7 +86,7 @@ def multi_positive_softmax_loss(
 class HybridStapleRankingLoss:
     """BCEWithLogitsLoss (unchanged, including its pos_weight correction)
     plus a small auxiliary pairwise ranking term scoped ONLY to staple-tier
-    cards (see training/metrics.py's card_tiers, STAPLE_TOP_N=50) -- the
+    cards (see training/metrics.py's card_tiers, STAPLE_TOP_N) -- the
     most surgical of the two options tried here: it targets exactly the
     diagnosed problem (staples specifically) without touching the loss's
     behavior on mid/long-tail cards, which is already the model's real

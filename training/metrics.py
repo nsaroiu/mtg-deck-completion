@@ -35,7 +35,18 @@ EVAL_KS = (20, 50, 100)
 
 # Popularity tiers for the breakdown below: "staple" = among the most common
 # cards in training decks, "long_tail" = rare, "mid" = everything else.
-STAPLE_TOP_N = 50
+# STAPLE_TOP_N raised from 50 to 75 after a real-data sweep (50/75/100/150/
+# 200 against the real training set): the raw frequency curve has no
+# natural cliff anywhere near 50 -- it's a smooth decay the whole way down
+# -- so 50 was never data-backed to begin with. 75 is the smallest cutoff
+# that pulls in Skullclamp/Esper Sentinel/Smothering Tithe/The One Ring,
+# all genuinely iconic staples that sat just past 50; 100+ captures
+# nothing further on that check while the restricted-pool backfill-
+# ranking cost (ensemble.py's actual production task) keeps climbing on
+# both specialist checkpoints in near-lockstep, confirming it's the
+# ranking task getting structurally harder with more candidates, not
+# either model regressing. 75 buys the coverage without the steeper cost.
+STAPLE_TOP_N = 75
 LONG_TAIL_MAX_DECKS = 20
 
 

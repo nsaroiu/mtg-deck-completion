@@ -135,19 +135,27 @@ SYNERGY_CHECKPOINT = "./data/set_transformer_softmax_checkpoint.pt"
 PRUNE_CHECKPOINT = "./data/prune_checkpoint_inject_lowdensity.pt"
 TIERS_PATH = "./data/card_tiers.json"
 
-# Real staple-tier card count, computed live from all 122,464 real decks,
-# grouped by commander color-identity SIZE (not exact WUBRG combination --
-# a cleaner 6-bucket split with plenty of decks per bucket). Replaces a
-# flat TARGET_STAPLE_COUNT=12 (this module's original single global
-# average) after checking directly: the true average varies nearly 5x
-# across bucket, from 4.0 (colorless) to 18.5 (4-color) -- a flat 12 would
-# have overshot colorless commanders by ~3x and undershot 4-color ones by
-# ~35%. The other half of that check -- whether the 50-card staple-tier
-# pool's LEGAL subset is ever the binding constraint instead -- came back
-# negative: even colorless commanders have 26 of the 50 legally available,
-# comfortably above the real ~4-card target, so legality never actually
-# caps this in practice; only the real-count lookup below is needed.
-TARGET_STAPLE_COUNT_BY_COLORS = {0: 4, 1: 6, 2: 10, 3: 14, 4: 19, 5: 15}
+# Real staple-tier card count, computed live from real decks, grouped by
+# commander color-identity SIZE (not exact WUBRG combination -- a cleaner
+# 6-bucket split with plenty of decks per bucket). Replaces a flat
+# TARGET_STAPLE_COUNT=12 (this module's original single global average)
+# after checking directly: the true average varies nearly 5x across
+# bucket -- a flat 12 would badly overshoot narrow commanders and
+# undershoot wide ones. The other half of that check -- whether the
+# staple-tier pool's LEGAL subset is ever the binding constraint instead
+# -- came back negative at every cutoff tested below: legal pool size
+# stays several multiples above the target at every color count, so
+# legality never actually caps this in practice; only the real-count
+# lookup below is needed.
+#
+# Recomputed twice since the first version: once after the training
+# dataset grew (122,571 -> 189,108 real decks), and again after
+# training.metrics.STAPLE_TOP_N moved 50 -> 75 (the original 50-card
+# cutoff had no real cliff backing it -- see that constant's own comment
+# -- and missed cards like Skullclamp/Esper Sentinel/Smothering
+# Tithe/The One Ring that most players would call staples). Current:
+# {0:7,1:8,2:12,3:16,4:23,5:19}.
+TARGET_STAPLE_COUNT_BY_COLORS = {0: 7, 1: 8, 2: 12, 3: 16, 4: 23, 5: 19}
 
 
 def target_staple_count_for(commander_colors: set[str]) -> int:
